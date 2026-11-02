@@ -91,9 +91,10 @@ is a single distribution at ~27–31% with more than one way to sample it.
 
 Under the tested configuration (7B coder, k≈4–8, temp 0.8–1.0, repair +
 hot retries, up to ~5 rounds, 35-primitive DSL): **0 fully train-verified
-programs in 223 candidates over 60 tasks** (i.e., no candidate passed ALL
-train pairs of its task; best_partial was 0 on the 30-task subset measured
-in detail). With a stronger 20B reasoning model: 1/15
+programs in 305 candidates over the two 30-task smoke runs (112 + 193), and
+none in the full 120-task run either** (i.e., no candidate passed ALL train
+pairs of its task; best_partial was 0 on all 60 smoke tasks measured in
+detail). With a stronger 20B reasoning model: 1/15
 tasks train-verified, 0/1 test-correct (pure train overfit — e.g., hardcoded
 triplet maps passing 2 train pairs, failing test). Statuses were ~99%
 wrong-output (not crashes/timeouts): programs run, they just never match
@@ -125,9 +126,7 @@ so the two views differ only in weighting). Train-loss medians: FULL-solved
 (n=31) 0.0067 vs PARTIAL (n=11) 0.0102 vs ZERO (n=78) 0.0096; the 11
 highest-loss tasks all miss (Spearman loss-vs-hits −0.17, a weak signal;
 cost-vs-hits −0.02, so size does not explain it). Threshold 0.02 was chosen
-as the visible elbow of sorted losses (≈15–18 tasks affected, +0.5h
-bounded).
-Threshold 0.02 was chosen as the visible elbow (≈15–18 tasks); the adaptive
+as the visible elbow of sorted losses (≈15–18 tasks affected); the adaptive
 second epoch (+0.5h bounded) ran inside the 28.47/29.72 submissions but was
 never isolated — we report it as a hypothesis with supporting correlation,
 not an established effect. Wording throughout: "correlates", never "predicts".
