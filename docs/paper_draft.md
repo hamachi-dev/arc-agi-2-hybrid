@@ -1,119 +1,164 @@
-# A Hybrid Transduction–Induction Pipeline for ARC-AGI-2: What Worked, What Didn't, and Why
+# A Practical Study of Test-Time Training and Verified Program Synthesis for ARC-AGI-2
 
-**Team Hamachi — ARC Prize 2026 Paper Track submission (draft)**
+**Team Hamachi (hamatz, Kaggle) — ARC Prize 2026 Paper Track submission (draft v2)**
 
 ## Abstract
 
-We built a hybrid ARC-AGI-2 solver combining (i) per-puzzle LoRA test-time
-training (TTT) on a 4B grid-specialized model with turbo-DFS decoding and
-augmentation rescoring (transduction), and (ii) train-verified program
-synthesis with a monotonic merge (induction). Best public score **31.39**
-(all scores herein are public-split scores; final standings use the private
-split). Our main contribution is empirical: a fully reproduced account of
-where each component helps, with two negative results we consider as
-informative as the positive ones — (a) 7B-coder blind sampling yields zero
-train-pair passes in 223 candidates over 60 tasks, and (b) two independent
-single-point failures that each deterministically zero a submission (a
-token-indexing port bug, and a subprocess interpreter miss launching workers
-with a torch-less `python`), both diagnosed in full. All code, tooling, and
-logs are open.
+We report a practical study of two approaches to ARC-AGI-2: (i) per-puzzle
+LoRA test-time training (TTT) on a 4B grid-specialized model with turbo-DFS
+decoding and augmentation rescoring (transduction — the effective
+baseline), and (ii) train-verified program synthesis with a monotonic merge
+(induction — investigated thoroughly, did not contribute to any scored
+submission). Best public score **31.39** (all scores herein are public-split
+scores: exact test-output matches divided by public outputs; final
+standings use the private split). Our contribution is empirical: ablations
+as far as the data allows, two fully diagnosed engineering failures, and
+all code, tooling, and logs open. Our headline finding is a bounded one:
+the tested induction approach fails systematically, and we document exactly
+how, so others need not repeat it.
 
 ## 1. Method
 
 ### 1.1 Base transduction (forked, credited)
 
-Our base is `koushikrudra/failed-in-aimo` (Apache 2.0): Qwen3-4B SFT
+Base: `koushikrudra/failed-in-aimo` (Apache 2.0): Qwen3-4B SFT
 (`sorokin/qwen3_4b_grids15_sft139`) + per-puzzle LoRA (r=256, 1 epoch over
-128 augmented variants) + constrained DFS decoding (12 grid tokens) +
-augmentation rescoring (8 queries, vote-margin selection), 4×L4 parallel.
+128 augmented variants, lr 5e-5, seed 42 throughout) + constrained DFS
+decoding (12 grid tokens, ~931 max new tokens) + augmentation rescoring
+(8 queries, vote-margin selection), 4×L4 parallel, ~5.4h per 240-task run.
 We kept its math intact and added: cost-ordered any-time queueing, per-key
-worker isolation, model-path resolution, adaptive second epoch on high-loss
-puzzles (see §3.3), and a GPU-resident rewrite of the two scoring hotspots
-(ported from `mikelou1`, verified numerically identical on CPU).
+worker isolation, model-path resolution, and an adaptive second epoch on
+high-loss puzzles (see §2.3).
 
-### 1.2 Verified induction + monotonic merge (ours)
+### 1.2 Scoring-hotspot rewrite (ported, credited, verified)
 
-In parallel we sample DSL programs (35 grid primitives, AST-whitelisted,
-torch-free sandbox with per-program timeouts) from a coder model, keep only
-programs passing ALL train pairs, and merge: verified outputs pre-empt
-`attempt_1`, the base candidate demotes to `attempt_2`. We prove by
-construction + unit test that the merge can only add coverage where the base
-emitted dummies, and bound the displacement risk elsewhere at the measured
-base attempt_2-exclusive rate (5.2%).
+We ported the GPU-resident rewrite of the two scoring hotspots from
+`mikelou1/arc-agi2-lb33-89-minimal-perfpatch`: NLL over ARC tokens computed
+on-GPU with gather (vs full-vocab CPU log-softmax), and teacher-forced
+rescoring with `use_cache=False` and target-only gather. By construction and
+by CPU proof (random-logit equivalence incl. the EOS path, atol 1e-4/1e-5),
+the math is identical; only wall time changes (~30% faster, enabling the
+adaptive epoch within budget).
+
+### 1.3 Verified induction + merge (ours; did not score)
+
+We sample DSL programs (35 primitives: grid ops, color ops, assembly,
+objects, symmetry/physics-ish helpers; AST-whitelisted, no imports/loops/
+classes; torch-free subprocess sandbox, 4s per-program timeout) from a
+coder model, keep only programs passing ALL train pairs, and merge verified
+outputs into `attempt_1` (base candidate demoted to `attempt_2`). Design
+rationale and risk bound in §2.2.
 
 ## 2. Experiments
 
-| Config | Eval (outputs) | Public score |
+Seeds fixed at 42 throughout (limitation: single draw per config except
+noted redraws). Submission IDs: base 57559497/57754454/57589119,
+adaptive 57617622, perfpatch-fork 57680657, fixed stack 57854842/57888206.
+
+| Config | Eval (172 outputs) | Public score |
 |---|---|---|
-| Base (v12) | 49/172 (28.5%) | 27.22 |
-| Base redraw (v16) | 46/172 (26.7%) | 30.56 |
-| Base + adaptive (v28) | — | 29.72 |
-| Base + perfpatch (mikelou1 fork, separate kernel) | — | **31.39** |
-| Fixed stack (v35: both incidents resolved) | — | 28.47 |
-| Control redraw (v12) | — | 30.14 |
+| Base | 49 (28.5%) | 27.22 |
+| Base redraw | 46 (26.7%) | 30.56 / 30.14 |
+| Base + adaptive | — | 29.72 |
+| Base + perfpatch (own fork of mikelou1) | — | **31.39** |
+| Base + perfpatch + adaptive (fixed stack) | — | 28.47 |
 
-Draw noise is ±3pp (same code, 27.22→30.14). Union of two draws adds only
-+2.3pp (49+46→53/172): reruns are not a strategy.
+Reading guide: eval (172 local outputs) and public LB (hidden-test subset)
+are different populations — compare within columns only. All public scores
+27–31 lie within observed draw noise (±3pp on redraws: 27.22→30.14 same
+code). The perfpatch is math-identical by construction, so 31.39 vs 27.22
+is a draw difference, not a method effect. Union of two base draws adds
+only +2.3pp (49+46→53/172): reruns are not a strategy.
 
-### 2.1 Negative result 1: blind induction fails
+Ablation status: Base / +Perfpatch / +Induction / +Both — induction added
+zero verified outputs in every run, so +Induction ≡ Base everywhere
+measured; +Perfpatch ≡ Base by construction (CPU proof). The honest summary
+is a single distribution at ~27–31% with more than one way to sample it.
 
-7B-coder sampling (k≈7, repair + hot retries): **0 train pairs passed in
-223 candidates over 60 tasks**. Stronger 20B reasoning model: 1/15 tasks
-train-verified, 0/1 test-correct (pure train overfit). Conclusion: sampling
-without search cannot compose ARC-AGI-2's multi-step rules; verification
-without generalization is insufficient. We terminated this line and document
-it so others need not repeat it.
+### 2.1 Induction fails systematically (bounded claim)
 
-### 2.2 Negative result 2: two independent single-point failures
+Under the tested configuration (7B coder, k≈4–8, temp 0.8–1.0, repair +
+hot retries, up to ~5 rounds, 35-primitive DSL): **0 train pairs passed in
+223 candidates over 60 tasks**. With a stronger 20B reasoning model: 1/15
+tasks train-verified, 0/1 test-correct (pure train overfit — e.g., hardcoded
+triplet maps passing 2 train pairs, failing test). Statuses were ~99%
+wrong-output (not crashes/timeouts): programs run, they just never match
+even one pair. We claim only this: blind sampling under the tested
+configuration failed to produce train-verified programs; whether search
+would help is untested. Recorded details: per-task candidate counts (2–8),
+best_partial = 0 on all 30 cheapest tasks, dedup rates, sample programs
+(saved). We terminated this line.
 
-Porting the (correct) GPU NLL rewrite, we kept token-ID indexing on the
-gathered 12-wide matrix; EOS (id 15) raised IndexError on every decode →
-all-dummy submissions. Separately, launching workers via `subprocess` with
-a bare `"python"` resolved to a torch-less interpreter; with output
-suppressed, every task silently skipped → identical all-dummy signature.
-Each alone zeroes a submission (three 0.00s total); diagnosis, CPU
-regression tests (matrix + integrated loop, incl. EOS path), the
-`sys.executable` fix, and a 3-task live probe (real predictions restored)
-are documented. Lessons: validate ported numerics through the consumer
-loop, not just the tensor; never swallow subprocess failures (`check=False`
-without a smoke signal).
+### 2.2 Two independent single-point failures (both diagnosed)
 
-### 2.3 Positive: loss predicts solvability
+(a) Token indexing: keeping token-ID indexing on the gathered 12-wide
+matrix makes EOS (id 15) raise IndexError on every decode (vocab has 16
+entries 0–15; gathered columns are positional 0–11). Fix: positional
+indexing (one line), plus CPU regression test now covering the consumer
+loop incl. the EOS path. (b) Subprocess interpreter: launching workers via
+`subprocess` with bare `"python"` resolved to a torch-less interpreter;
+with output suppressed, every task silently skipped. Fix: `sys.executable`
+(proven by a 3-task live probe yielding real predictions), plus a
+pre-push gate (3.11 grammar, skeleton, merge tests). Each bug alone zeroes
+a submission (three 0.00s); the fixed stack scores normally (28.47).
+Lesson: validate ported numerics through the consumer loop, and never
+swallow subprocess failures.
 
-Train loss medians: FULL-solved 0.0067 < PARTIAL 0.0102; the 11 highest-loss
-tasks all miss. Our adaptive second epoch (loss > 0.02 only, +0.5h bounded)
-targets exactly this population; it shipped in v28/v35 (29.72/28.47, within
-draw noise of baselines — directionally consistent, not yet isolated).
+### 2.3 Loss correlates with solvability (hypothesis, not claim)
 
-## 3. Theory (why TTT works here, briefly)
+Train-loss medians: FULL-solved 0.0067 (n=31) vs PARTIAL 0.0102 (n=11) vs
+ZERO 0.0096 (n=78); the 11 highest-loss tasks all miss (Spearman
+loss-vs-hits −0.17; cost-vs-hits −0.02, so size does not explain it).
+Threshold 0.02 was chosen as the visible elbow (≈15–18 tasks); the adaptive
+second epoch (+0.5h bounded) ran inside the 28.47/29.72 submissions but was
+never isolated — we report it as a hypothesis with supporting correlation,
+not an established effect. Wording throughout: "correlates", never "predicts".
+
+### 2.4 Merge design (scoped)
+
+The merge promotes train-verified outputs to `attempt_1`, demoting base
+`attempt_1` to `attempt_2` (base `attempt_2` is displaced). Three distinct
+quantities: train verification (observed), test generalization (unknown —
+our only verified program failed test), displacement loss (bounded by the
+measured base attempt_2-exclusive rate, 5.2%, 9/172). Monotonicity holds
+only where the base emitted dummies; elsewhere it is an expected-value bet
+we did not get to settle (induction never verified on scored runs).
+
+## 3. Theory (brief, scoped)
 
 Per-puzzle LoRA fits the task's implicit program into the adapter while the
 frozen SFT prior supplies grid syntax; augmentation rescoring then selects
-for invariance across symmetries rather than likelihood. This explains both
-the method's floor (~27%: prior + search) and its ceiling (no compositional
-generalization beyond the adapter's reach — consistent with §2.1).
+for invariance across symmetries rather than likelihood. Consistent with
+the observed floor (~27%), the loss correlation (§2.3), and the induction
+failure (§2.1: no compositional generalization from sampling). Stated as an
+interpretation, not a theorem.
 
-## 4. Universality, Completeness
+## 4. Reproducibility and runtime coverage
 
-Task-agnostic single code path for all 240 hidden tasks; identical files run
-on Kaggle L4×4 and locally (sandbox selftest 9/9, CPU). Artifacts: loader,
-decoder, solver, queue, induction sandbox + runtime, validator, scheduler
-simulator, debug harnesses, full logs. Reproduction: attach listed data +
-models, run cells in order (≈5.5h on 4×L4).
+Task-agnostic single code path for all tasks; sandbox selftest 9/9 (CPU).
+Environment: Kaggle 4×L4, Python 3.11, unsloth+flash-patch bundle per
+notebook metadata (exact pins in kernel metadata), SFT revision
+`sorokin/qwen3_4b_grids15_sft139` Transformers/bfloat16/1, seeds fixed 42,
+~5.4h per 240-task run (≈322 s/task), weekly quota 108k GPU-s. Artifacts:
+loader, decoder, solver, queue, induction sandbox + runtime, validator,
+scheduler simulator, debug harnesses, full logs, per-task analyses.
+Reproduction: attach listed data + models, run cells in order. Public-score
+history with submission IDs is in §2.
 
-## 5. Novelty statement (honest)
+## 5. Novelty statement (scoped)
 
-The transduction backbone is forked (credited above); the scoring-hotspot
-math is ported (credited). Ours: adaptive-by-loss training, monotonic
-verified merge with bounded risk, any-time queue, the negative-result
-characterizations (§2.1–2.2), and the offline-synthesis protocol with
-train-only verification.
+Backbone forked (credited); hotspot math ported (credited). Ours: (1) a
+verified-program integration design with bounded displacement risk; (2)
+adaptive-by-loss compute allocation (hypothesis stage); (3) failure
+characterizations — induction non-results under stated conditions and two
+independently fatal port bugs with regression tests. (1) and (2) lack
+isolated effect sizes, stated plainly above.
 
 ## References / artifacts
 
 - Base: kaggle.com/code/koushikrudra/failed-in-aimo (Apache 2.0)
-- Perf patch math: kaggle.com/code/mikelou1/arc-agi2-lb33-89-minimal-perfpatch
+- Perf math: kaggle.com/code/mikelou1/arc-agi2-lb33-89-minimal-perfpatch
 - SFT model: kaggle.com/models/sorokin/qwen3_4b_grids15_sft139 (Apache 2.0)
-- Our fork: kaggle.com/code/hamatz/failed-in-aimo
-- Our 31.39 kernel: kaggle.com/code/hamatz/arc-agi2-lb33-89-minimal-perfpatch
-- Tooling + logs: https://github.com/hamachi-dev/arc-agi-2-hybrid (Apache 2.0)
+- Our kernels: kaggle.com/code/hamatz/failed-in-aimo,
+  kaggle.com/code/hamatz/arc-agi2-lb33-89-minimal-perfpatch
+- Code + tooling + logs: https://github.com/hamachi-dev/arc-agi-2-hybrid (Apache 2.0)
