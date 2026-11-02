@@ -1,0 +1,3 @@
+# cell 0
+import time
+global_end_time = time.time() + 12 * 3600 - 600

@@ -1,0 +1,19 @@
+# build artifacts, pulls, caches
+__pycache__/
+*.pyc
+.venv*/
+unsloth_compiled_cache/
+.opencode/
+# kaggle pulls & runs
+fork*/
+upstream*/
+upstream_check/
+v8/
+run_*/
+work/
+# data & models (see README for sources)
+data/
+download_urls.json
+*.tar.gz
+# local-only paths
+*.log
