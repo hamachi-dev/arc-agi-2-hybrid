@@ -154,6 +154,20 @@ characterizations — induction non-results under stated conditions and two
 independently fatal port bugs with regression tests. (1) and (2) lack
 isolated effect sizes, stated plainly above.
 
+## 6. Related work (compact)
+
+ARC-AGI-2 (Chollet et al., ARC Prize Foundation, 2025) extends ARC-AGI-1
+with harder compositional tasks. The NVARC 2024/2025 winning solutions
+established per-task test-time training as the competitive backbone; our
+transduction line descends from the public `failed-in-aimo` notebook
+(K. Rudra, 2026) with the scoring-hotspot optimization of `mikelou1`
+(2026). Program synthesis for ARC spans enumerative DSL search and recent
+LLM-guided attempts; ours differs in requiring full train-set verification
+before use, and in reporting its failure quantitatively (§2.1). Test-time
+training as a paradigm follows the TTT line (Sun et al., 2020; Akyürek et
+al., 2024); our adaptive-by-loss scheduling (§2.3) is a small,
+task-dependent extension, unevaluated in isolation.
+
 ## References / artifacts
 
 - Base: kaggle.com/code/koushikrudra/failed-in-aimo (Apache 2.0)
