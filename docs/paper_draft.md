@@ -48,10 +48,9 @@ base attempt_2-exclusive rate (5.2%).
 | Base (v12) | 49/172 (28.5%) | 27.22 |
 | Base redraw (v16) | 46/172 (26.7%) | 30.56 |
 | Base + adaptive (v28) | — | 29.72 |
-| Base + perfpatch (mikelou1 fork) | — | **31.39** |
-| Fixed stack (v35) | — | 28.47 |
+| Base + perfpatch (mikelou1 fork, separate kernel) | — | **31.39** |
+| Fixed stack (v35: both incidents resolved) | — | 28.47 |
 | Control redraw (v12) | — | 30.14 |
-| Control redraw | — | 30.14 |
 
 Draw noise is ±3pp (same code, 27.22→30.14). Union of two draws adds only
 +2.3pp (49+46→53/172): reruns are not a strategy.
@@ -65,20 +64,26 @@ without search cannot compose ARC-AGI-2's multi-step rules; verification
 without generalization is insufficient. We terminated this line and document
 it so others need not repeat it.
 
-### 2.2 Negative result 2: a one-line port kills everything
+### 2.2 Negative result 2: two independent single-point failures
 
 Porting the (correct) GPU NLL rewrite, we kept token-ID indexing on the
 gathered 12-wide matrix; EOS (id 15) raised IndexError on every decode →
-all-dummy submissions scoring 0.00 three times. Diagnosis, CPU regression
-test (matrix + integrated loop, incl. EOS path), and fix are documented.
-Lesson: validate ported numerics through the consumer loop, not just the
-tensor.
+all-dummy submissions. Separately, launching workers via `subprocess` with
+a bare `"python"` resolved to a torch-less interpreter; with output
+suppressed, every task silently skipped → identical all-dummy signature.
+Each alone zeroes a submission (three 0.00s total); diagnosis, CPU
+regression tests (matrix + integrated loop, incl. EOS path), the
+`sys.executable` fix, and a 3-task live probe (real predictions restored)
+are documented. Lessons: validate ported numerics through the consumer
+loop, not just the tensor; never swallow subprocess failures (`check=False`
+without a smoke signal).
 
 ### 2.3 Positive: loss predicts solvability
 
 Train loss medians: FULL-solved 0.0067 < PARTIAL 0.0102; the 11 highest-loss
 tasks all miss. Our adaptive second epoch (loss > 0.02 only, +0.5h bounded)
-targets exactly this population; hidden measurement pending at submission.
+targets exactly this population; it shipped in v28/v35 (29.72/28.47, within
+draw noise of baselines — directionally consistent, not yet isolated).
 
 ## 3. Theory (why TTT works here, briefly)
 
@@ -109,5 +114,6 @@ train-only verification.
 - Base: kaggle.com/code/koushikrudra/failed-in-aimo (Apache 2.0)
 - Perf patch math: kaggle.com/code/mikelou1/arc-agi2-lb33-89-minimal-perfpatch
 - SFT model: kaggle.com/models/sorokin/qwen3_4b_grids15_sft139 (Apache 2.0)
-- Our fork: kaggle.com/code/hamatz/failed-in-aimo (LB 31.39 via v-fork)
-- Tooling + logs: [repo link TODO]
+- Our fork: kaggle.com/code/hamatz/failed-in-aimo
+- Our 31.39 kernel: kaggle.com/code/hamatz/arc-agi2-lb33-89-minimal-perfpatch
+- Tooling + logs: https://github.com/hamachi-dev/arc-agi-2-hybrid (Apache 2.0)
